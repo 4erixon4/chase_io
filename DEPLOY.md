@@ -122,12 +122,15 @@ EOF
 mount -a -v
 mkdir -p /mnt/box/media/movies /mnt/box/media/tv    # library dirs on the box
 mkdir -p /data/downloads/sonarr /data/downloads/radarr /opt/appdata
-# CRITICAL: /data is local disk created root-owned; Decypharr's worker runs as
-# uid 1000 and must be able to create /data/downloads/<category>. Without this
-# chown, every download fails with "mkdir ...: permission denied" and Sonarr/
+# CRITICAL: /data/downloads is local disk created root-owned; Decypharr's worker
+# runs as uid 1000 and must be able to create /data/downloads/<category>. Without
+# this chown, every download fails with "mkdir ...: permission denied" and Sonarr/
 # Radarr show "qBittorrent is reporting an error". (/mnt/box already gets
 # uid=1000 from the fstab options above.)
-chown -R 1000:1000 /data
+# NB: chown ONLY /data/downloads — NEVER `chown -R /data`. Coolify stores its own
+# data under /data/coolify owned by uid 9999; a recursive chown of /data steals
+# that and Coolify 500s with "Unable to create a directory .../storage/app/ssh/mux".
+chown -R 1000:1000 /data/downloads
 df -h /mnt/box                                       # confirm the box is mounted
 
 # Docker
