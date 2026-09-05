@@ -83,7 +83,10 @@ def dc(args, compose_dir=None, **kw):
         if not cid:
             return subprocess.CompletedProcess(
                 args, 1, "", f"[lib_env] no running container for service '{svc}'")
-        base = ["docker", "exec", cid] + cmd if args[0] == "exec" \
+        # `-i` keeps stdin open so callers can pipe input (e.g. writing a config
+        # file via `sh -c "cat > /path"`); harmless for commands that don't read
+        # stdin. This mirrors `docker compose exec -T`.
+        base = ["docker", "exec", "-i", cid] + cmd if args[0] == "exec" \
             else ["docker", "restart", cid]
         return subprocess.run(base, **kw)
     return subprocess.run(["docker", "compose"] + args, cwd=compose_dir, **kw)
