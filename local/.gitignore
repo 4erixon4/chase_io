@@ -1,0 +1,5 @@
+# Local-only runtime data — never commit
+.env
+appdata/
+downloads/
+library/

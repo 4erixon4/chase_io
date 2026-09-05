@@ -1,0 +1,136 @@
+# =============================================================================
+# Phase 2 stack — *arr + Plex on Hetzner, TorBox debrid via Decypharr (download
+# mode), Storage Box library, Tailscale-only.
+#
+# Paths are IDENTICAL in every container (no remote-path mappings):
+#   /data/downloads   local VPS disk — Decypharr downloads real files HERE
+#   /mnt/box/media    Storage Box (CIFS)  — Radarr/Sonarr copy the library HERE
+#
+# Every published port binds to ${TS_IP} (the Tailscale interface) only. The
+# Hetzner Cloud Firewall stays as a second layer, not the only one.
+#
+# PUID/PGID come from .env (the single source of truth) and MUST equal the
+# fstab uid=1000,gid=1000 on the Storage Box mount.
+# =============================================================================
+
+x-common-env: &common-env
+  PUID: ${PUID}
+  PGID: ${PGID}
+  TZ: ${TZ}
+
+services:
+  # --- Download client: Decypharr -> TorBox --------------------------------
+  # LOAD-BEARING: Decypharr must run in DOWNLOAD mode so it writes REAL FILES to
+  # /data/downloads (not symlinks / not a WebDAV/rclone mount). The whole
+  # copy-to-Storage-Box pipeline depends on this. Set the action to "download"
+  # in Decypharr's config/first-run wizard and DO NOT switch it to symlink to
+  # "save space" later — that silently breaks imports to the Storage Box.
+  decypharr:
+    image: cy01/blackhole:v2.5          # PINNED — load-bearing; do not float to :latest
+    container_name: decypharr
+    environment:
+      <<: *common-env
+      UMASK: "002"
+    volumes:
+      - /opt/appdata/decypharr:/app          # config.json lives here
+      - /data:/data                          # download_folder = /data/downloads
+    ports:
+      - "${TS_IP}:8282:8282"                 # qBittorrent-mock API + Web UI
+    restart: unless-stopped
+
+  # --- Indexers ------------------------------------------------------------
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest   # freeze to version-<X> (README)
+    container_name: prowlarr
+    environment: *common-env
+    volumes:
+      - /opt/appdata/prowlarr:/config
+    ports:
+      - "${TS_IP}:9696:9696"
+    restart: unless-stopped
+
+  # --- Movies / TV ---------------------------------------------------------
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest     # freeze to version-<X> (README)
+    container_name: radarr
+    environment: *common-env
+    volumes:
+      - /opt/appdata/radarr:/config
+      - /data:/data                          # source: /data/downloads
+      - /mnt/box/media:/mnt/box/media        # dest:   /mnt/box/media/movies
+    ports:
+      - "${TS_IP}:7878:7878"
+    restart: unless-stopped
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest     # freeze to version-<X> (README)
+    container_name: sonarr
+    environment: *common-env
+    volumes:
+      - /opt/appdata/sonarr:/config
+      - /data:/data
+      - /mnt/box/media:/mnt/box/media        # dest: /mnt/box/media/tv
+    ports:
+      - "${TS_IP}:8989:8989"
+    restart: unless-stopped
+
+  # --- Queue hygiene: REQUIRED (single source, no fallback) ----------------
+  # Detects stalled / seederless (dead) TorBox items and triggers a re-search,
+  # so one stuck download can't block a request forever.
+  cleanuparr:
+    image: ghcr.io/cleanuparr/cleanuparr:2.10.5   # PINNED (tag has no leading 'v')
+    container_name: cleanuparr
+    environment: *common-env
+    volumes:
+      - /opt/appdata/cleanuparr:/config
+    ports:
+      - "${TS_IP}:11011:11011"
+    restart: unless-stopped
+
+  # --- Subtitles (Hebrew via OpenSubtitles) --------------------------------
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest     # freeze to version-<X> (README)
+    container_name: bazarr
+    environment: *common-env
+    volumes:
+      - /opt/appdata/bazarr:/config
+      - /mnt/box/media:/mnt/box/media        # writes .srt beside the media
+    ports:
+      - "${TS_IP}:6767:6767"
+    restart: unless-stopped
+
+  # --- Requests ------------------------------------------------------------
+  # NOTE: sctx/overseerr is DEPRECATED (last release v1.35.0, Feb 2026); the
+  # successor is "Seerr". Pinned to 1.35.0 — it still works. Consider migrating
+  # to Seerr later (see README).
+  overseerr:
+    image: sctx/overseerr:1.35.0        # PINNED (deprecated upstream)
+    container_name: overseerr
+    environment:
+      TZ: ${TZ}                              # overseerr manages its own user;
+                                             # it never writes to /mnt/box.
+    volumes:
+      - /opt/appdata/overseerr:/app/config
+    ports:
+      - "${TS_IP}:5055:5055"
+    restart: unless-stopped
+
+  # --- Media server --------------------------------------------------------
+  # Official Plex image. Remote access OFF and LAN = 100.64.0.0/10 are set in
+  # the Plex UI (see README). PLEX_CLAIM is only needed at first run and EXPIRES
+  # 4 MINUTES after you generate it at https://www.plex.tv/claim.
+  plex:
+    image: plexinc/pms-docker:1.43.3.10896-cb3ebc72d   # PINNED
+    container_name: plex
+    environment:
+      TZ: ${TZ}
+      PLEX_UID: ${PUID}                      # keep Plex on the same uid/gid so
+      PLEX_GID: ${PGID}                      # it can read the CIFS library
+      PLEX_CLAIM: ${PLEX_CLAIM}
+      ADVERTISE_IP: "http://${TS_IP}:32400/"
+    volumes:
+      - /opt/appdata/plex:/config
+      - /mnt/box/media:/mnt/box/media
+    ports:
+      - "${TS_IP}:32400:32400"
+    restart: unless-stopped

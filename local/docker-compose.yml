@@ -1,0 +1,127 @@
+# =============================================================================
+# LOCAL variant — for learning the UIs and settling the first half of S1 for
+# free, BEFORE provisioning anything on Hetzner. This is NOT production.
+#
+# Differences from ../stack/docker-compose.yml:
+#   - Ports bind to 127.0.0.1 (not a Tailscale IP). No remote access, no tailnet.
+#   - Host volumes are local repo folders (./downloads, ./library, ./appdata),
+#     all gitignored. Container paths are kept IDENTICAL to production
+#     (/data/downloads, /mnt/box/media) so the settings you learn transfer 1:1 —
+#     but there is NO real Storage Box here; /mnt/box/media is just ./library.
+#
+# What this canNOT validate (see README): copy-vs-hardlink import path, the
+# Storage Box 10-connection cap, Plex-over-CIFS scan performance, the Tailscale
+# interface binding / security model, and the reaper's mnt-box.mount dependency.
+#
+# Image tags match production pins so local mirrors what you'll deploy.
+# =============================================================================
+
+x-common-env: &common-env
+  PUID: ${PUID}
+  PGID: ${PGID}
+  TZ: ${TZ}
+
+services:
+  # --- Download client: Decypharr -> TorBox --------------------------------
+  # THE local test target: in DOWNLOAD mode Decypharr must write a REAL FILE to
+  # /data/downloads (-> ./downloads), not a symlink. See README step "S1".
+  decypharr:
+    image: cy01/blackhole:v2.5
+    container_name: decypharr-local
+    environment:
+      <<: *common-env
+      UMASK: "002"
+    volumes:
+      - ./appdata/decypharr:/app          # config.json lives here
+      - ./downloads:/data/downloads       # download_folder = /data/downloads
+    ports:
+      - "127.0.0.1:8282:8282"
+    restart: unless-stopped
+
+  # --- Indexers ------------------------------------------------------------
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr-local
+    environment: *common-env
+    volumes:
+      - ./appdata/prowlarr:/config
+    ports:
+      - "127.0.0.1:9696:9696"
+    restart: unless-stopped
+
+  # --- Movies / TV ---------------------------------------------------------
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr-local
+    environment: *common-env
+    volumes:
+      - ./appdata/radarr:/config
+      - ./downloads:/data/downloads       # source
+      - ./library:/mnt/box/media          # dest (local folder, NOT a Storage Box)
+    ports:
+      - "127.0.0.1:7878:7878"
+    restart: unless-stopped
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr-local
+    environment: *common-env
+    volumes:
+      - ./appdata/sonarr:/config
+      - ./downloads:/data/downloads
+      - ./library:/mnt/box/media
+    ports:
+      - "127.0.0.1:8989:8989"
+    restart: unless-stopped
+
+  # --- Queue hygiene -------------------------------------------------------
+  cleanuparr:
+    image: ghcr.io/cleanuparr/cleanuparr:2.10.5
+    container_name: cleanuparr-local
+    environment: *common-env
+    volumes:
+      - ./appdata/cleanuparr:/config
+    ports:
+      - "127.0.0.1:11011:11011"
+    restart: unless-stopped
+
+  # --- Subtitles -----------------------------------------------------------
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr-local
+    environment: *common-env
+    volumes:
+      - ./appdata/bazarr:/config
+      - ./library:/mnt/box/media          # writes .srt beside the media
+    ports:
+      - "127.0.0.1:6767:6767"
+    restart: unless-stopped
+
+  # --- Requests ------------------------------------------------------------
+  overseerr:
+    image: sctx/overseerr:1.35.0          # deprecated upstream; fine for learning
+    container_name: overseerr-local
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - ./appdata/overseerr:/app/config
+    ports:
+      - "127.0.0.1:5055:5055"
+    restart: unless-stopped
+
+  # --- Media server --------------------------------------------------------
+  plex:
+    image: plexinc/pms-docker:1.43.3.10896-cb3ebc72d
+    container_name: plex-local
+    environment:
+      TZ: ${TZ}
+      PLEX_UID: ${PUID}
+      PLEX_GID: ${PGID}
+      PLEX_CLAIM: ${PLEX_CLAIM}
+      ADVERTISE_IP: "http://127.0.0.1:32400/"
+    volumes:
+      - ./appdata/plex:/config
+      - ./library:/mnt/box/media
+    ports:
+      - "127.0.0.1:32400:32400"
+    restart: unless-stopped

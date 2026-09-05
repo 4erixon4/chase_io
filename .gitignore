@@ -1,0 +1,30 @@
+# =============================================================================
+# Secrets — NEVER commit. All real values live in .env (see .env.example).
+# =============================================================================
+.env
+**/.env
+!.env.example
+secret.txt
+**/secrets.env
+
+# Legacy secret locations (kept so old checkouts can't leak them)
+scripts/secrets.env
+
+# =============================================================================
+# Local runtime data — created by the local dev stack, not source.
+# =============================================================================
+local/appdata/
+local/downloads/
+local/library/
+appdata/
+downloads/
+
+# =============================================================================
+# Python / OS cruft
+# =============================================================================
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+Thumbs.db
