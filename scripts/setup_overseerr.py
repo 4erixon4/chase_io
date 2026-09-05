@@ -25,6 +25,12 @@ COMPOSE_DIR = os.environ.get("COMPOSE_DIR", "local")
 API_HOST = os.environ.get("API_HOST", "127.0.0.1")
 PORT = 5055
 
+# How OTHER containers reach Plex. Locally Plex is on the docker bridge, so the
+# service name "plex" resolves. On the VPS Plex runs on HOST networking (so it
+# can advertise the tailnet IP to plex.tv), which means it's NOT on the bridge —
+# the "plex" name won't resolve there. So use the (stable) tailnet IP when set.
+PLEX_HOST = os.environ.get("PLEX_HOST") or os.environ.get("TS_IP") or "plex"
+
 RADARR = {"name": "Radarr", "hostname": "radarr", "port": 7878,
           "dir": "/mnt/box/media/movies"}
 SONARR = {"name": "Sonarr", "hostname": "sonarr", "port": 8989,
@@ -74,8 +80,21 @@ def add_plex_notification(service, port, token):
     """Built-in Radarr/Sonarr 'Plex Media Server' connect -> library scan on import."""
     key = arr_key(service)
     existing = arr_api(port, key, "GET", "/api/v3/notification") or []
-    if any(n.get("implementation") == "PlexServer" for n in existing):
-        log(f"{service}: Plex connection exists (ok)")
+    cur = next((n for n in existing if n.get("implementation") == "PlexServer"), None)
+    if cur:
+        # Converge, don't just skip: an existing entry may point at the old "plex"
+        # container name, which stops resolving once Plex moves to host networking.
+        host_field = next((f for f in cur.get("fields", []) if f.get("name") == "host"), {})
+        if str(host_field.get("value")) == PLEX_HOST:
+            log(f"{service}: Plex connection exists at {PLEX_HOST} (ok)")
+            return
+        for f in cur.get("fields", []):
+            if f.get("name") == "host":
+                f["value"] = PLEX_HOST
+            elif f.get("name") == "authToken" and token:
+                f["value"] = token
+        arr_api(port, key, "PUT", f"/api/v3/notification/{cur['id']}?forceSave=true", cur)
+        log(f"{service}: updated Plex connection host -> {PLEX_HOST}")
         return
     schema = arr_api(port, key, "GET", "/api/v3/notification/schema") or []
     plex = next((s for s in schema if s.get("implementation") == "PlexServer"), None)
@@ -84,7 +103,7 @@ def add_plex_notification(service, port, token):
     for f in plex.get("fields", []):
         n = f.get("name")
         if n == "host":
-            f["value"] = "plex"
+            f["value"] = PLEX_HOST
         elif n == "port":
             f["value"] = 32400
         elif n == "useSsl":
@@ -161,6 +180,26 @@ def configure_arr(kind, spec, key, ok):
         f"'{prof['name']}', root '{root}')")
 
 
+def set_overseerr_plex(ok):
+    """Point Overseerr's Plex connection at PLEX_HOST. The wizard stores it as the
+    'plex' container name, which stops resolving once Plex is on host networking."""
+    try:
+        cur = api("GET", "/api/v1/settings/plex", ok) or {}
+    except RuntimeError:
+        cur = {}
+    if cur.get("ip") == PLEX_HOST and int(cur.get("port") or 0) == 32400:
+        log(f"overseerr: Plex connection already {PLEX_HOST}:32400 (ok)")
+        return
+    body = dict(cur)
+    body.update({"ip": PLEX_HOST, "port": 32400, "useSsl": False})
+    try:
+        api("POST", "/api/v1/settings/plex", ok, body)
+        log(f"overseerr: Plex connection -> {PLEX_HOST}:32400")
+    except RuntimeError as e:
+        log(f"overseerr: could NOT update Plex connection ({e}). Set it by hand in "
+            f"Settings -> Plex -> hostname={PLEX_HOST}, port=32400.")
+
+
 def enable_watchlist(ok):
     users = api("GET", "/api/v1/user?take=100", ok) or {}
     results = users.get("results", users if isinstance(users, list) else [])
@@ -181,6 +220,7 @@ def main():
     log("Overseerr API key loaded")
     configure_arr("radarr", RADARR, arr_key("radarr"), ok)
     configure_arr("sonarr", SONARR, arr_key("sonarr"), ok)
+    set_overseerr_plex(ok)
     enable_watchlist(ok)
 
     # Built-in Radarr/Sonarr -> Plex "scan on import" so new files appear promptly.

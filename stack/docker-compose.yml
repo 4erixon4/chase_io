@@ -147,6 +147,17 @@ services:
   plex:
     image: plexinc/pms-docker:1.43.3.10896-cb3ebc72d   # PINNED
     container_name: plex
+    # HOST NETWORKING (not bridge). A bridge container only sees its own docker
+    # IP (172.x) + loopback, so Plex advertised THOSE to plex.tv and every client
+    # that relies on discovery (app.plex.tv, phone, TV) failed with "unavailable".
+    # On the host network Plex sees the real tailscale0 interface (${TS_IP}) and
+    # advertises a reachable address. Tailscale IPs are STABLE per node (assigned
+    # once, survive reboots/reconnects), so ${TS_IP} won't drift.
+    #
+    # SECURITY: in host mode Plex binds 0.0.0.0:32400 (incl. the public IP). The
+    # Hetzner firewall (default-deny inbound, only WireGuard/UDP 41641 allowed) is
+    # what keeps 32400 off the public internet. Do NOT add a 32400 allow rule.
+    network_mode: host
     environment:
       TZ: ${TZ}
       PLEX_UID: ${PUID}                      # keep Plex on the same uid/gid so
@@ -156,6 +167,5 @@ services:
     volumes:
       - /opt/appdata/plex:/config
       - /mnt/box/media:/mnt/box/media
-    ports:
-      - "${TS_IP}:32400:32400"
+    # No `ports:` in host mode — Plex binds the host's interfaces directly.
     restart: unless-stopped
