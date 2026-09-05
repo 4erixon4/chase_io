@@ -60,6 +60,38 @@ def token():
     return m.group(1) if m else None
 
 
+def configure_secure_access(tok):
+    """Advertise a VALID-TLS tailnet URL so Plex clients stop warning about
+    "insecure connections". Plex holds a real wildcard cert for
+    *.<hash>.plex.direct; the hostname <ts-ip-dashes>.<hash>.plex.direct resolves
+    (via Plex DNS) to the tailnet IP, so a client on the tailnet gets a trusted
+    cert AND reaches the box directly. The <hash> is per-server, so we read it
+    straight from the cert Plex is currently serving (authoritative) rather than
+    hardcoding it — a rebuilt server gets a new hash and this still works.
+    VPS-only: needs TS_IP; skipped locally (local uses 127.0.0.1 over HTTP)."""
+    ts = os.environ.get("TS_IP")
+    if not ts:
+        log("no TS_IP in env -> skipping plex.direct secure URL (local run)")
+        return
+    out = dc(["exec", "-T", "plex", "sh", "-c",
+              "echo | openssl s_client -connect localhost:32400 2>/dev/null | "
+              "openssl x509 -noout -subject 2>/dev/null"]).stdout or ""
+    m = re.search(r"[0-9a-f]{32}", out)
+    if not m:
+        log("could not read plex.direct hash from cert -> leaving connections as-is")
+        return
+    h = m.group(0)
+    conn = (f"https://{ts.replace('.', '-')}.{h}.plex.direct:32400,"
+            f"http://{ts}:32400")
+    for k, v in (("customConnections", conn),
+                 ("LanNetworksBandwidth", "100.64.0.0/10"),  # tailnet = LAN
+                 ("secureConnections", "1")):          # 1 = preferred (not required)
+        code, _ = req("PUT", f"/:/prefs?{urllib.parse.urlencode({k: v})}", tok)
+        log(f"net pref {k} -> {code}")
+    log(f"secure tailnet URL advertised: https://{ts.replace('.', '-')}."
+        f"{h}.plex.direct:32400  (use app.plex.tv signed in — no insecure warning)")
+
+
 def req(method, path, tok, accept_xml=True):
     # Route through the container's OWN localhost. Plex refuses admin writes
     # (PUT /:/prefs, POST /library/sections) from a "remote" address — over the
@@ -99,6 +131,9 @@ def main():
     if skipped:
         log("prefs not accepted (often Plex-Pass-only, safe to ignore): "
             + ", ".join(skipped))
+
+    # 1b. Secure tailnet access (valid TLS via plex.direct) — VPS only.
+    configure_secure_access(tok)
 
     # 2. Libraries (idempotent by title)
     _, secs = req("GET", "/library/sections", tok)
