@@ -222,10 +222,16 @@ cd /opt/chase_io
 export COMPOSE_DIR=<dir of the deployed stack compose>   # so `docker compose exec` finds the containers
 export API_HOST=$(tailscale ip -4 | head -n1)            # ports bind to TS_IP, not 127.0.0.1
 ```
-> If `docker compose exec` in `COMPOSE_DIR` can't see the containers (Coolify may
-> use a different compose *project* name), run the scripts from Coolify's own
-> source directory for the stack, or `docker compose -p <coolify-project>`.
-> `docker compose ps` there should list radarr/sonarr/etc.
+> The scripts resolve each container by its compose **service label**
+> (`com.docker.compose.service=<svc>`) and `docker exec` into it directly, so they
+> work under Coolify's mangled container names regardless of `COMPOSE_DIR`. All
+> five setup scripts honour `API_HOST` for their host-port API calls.
+>
+> ⚠️ **Coolify auto-redeploy:** if the stack deploys on push, a `git push` to the
+> tracked branch makes Coolify recreate the containers (brief downtime; app config
+> persists in the `/opt/appdata/*` bind mounts). If a script hits "no running
+> container" mid-setup, wait for the redeploy to finish (or `docker start` the app
+> containers) and re-run — every script is idempotent.
 
 Order (mirrors [`SETUP_RUNBOOK.md`](SETUP_RUNBOOK.md) §0):
 
@@ -237,13 +243,20 @@ Order (mirrors [`SETUP_RUNBOOK.md`](SETUP_RUNBOOK.md) §0):
    python3 scripts/setup_cleanuparr.py   # creates its admin account, queue-cleaner rules
    python3 scripts/setup_bazarr.py       # arrs + OpenSubtitles + EN/HE profile
    ```
-3. 👤 **USER** — open Plex (`http://<TS_IP>:32400/web`), **sign in / claim** the
-   server (fresh 4-min claim token). Then:
+3. 👤 **USER** — get a fresh **4-min claim token** from <https://www.plex.tv/claim>
+   (logged into your Plex account) and paste it to the agent. **Do not** use the
+   web wizard over the tailnet — an *unclaimed* server returns "Not authorized" to
+   a remote IP. 🤖 **AGENT** claims it from *inside* the container, then configures:
    ```bash
+   p=$(docker ps -q -f label=com.docker.compose.service=plex)
+   docker exec "$p" curl -s -X POST \
+     "http://localhost:32400/myplex/claim?token=<CLAIM>&X-Plex-Product=Plex%20Media%20Server"
    python3 scripts/setup_plex.py         # CIFS-friendly prefs + Movies/TV libraries
    ```
-   Also in the Plex UI (one-time, API doesn't cover cleanly): **Remote Access
-   OFF**, **Network → LAN Networks = `100.64.0.0/10`**.
+   `setup_plex.py` routes admin writes through the container's localhost (Plex
+   403s admin writes — prefs, library creation — from a remote IP; new agents also
+   require locale `en-US`). Also set in the Plex UI once: **Remote Access OFF**,
+   **Network → LAN Networks = `100.64.0.0/10`**.
 4. 👤 **USER** — open Overseerr (`http://<TS_IP>:5055`), **sign in with Plex**,
    and on the Plex step **override Hostname to `plex`** (service name), port
    32400. Leave Radarr/Sonarr empty → Finish. Then:

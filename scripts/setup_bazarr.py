@@ -21,7 +21,8 @@ import json, os, re, subprocess, sys, urllib.parse, urllib.request, urllib.error
 import lib_env  # noqa: F401  (loads repo-root .env into os.environ on import)
 from lib_env import env
 
-BASE = os.environ.get("BAZARR_URL", "http://127.0.0.1:6767")
+BASE = os.environ.get("BAZARR_URL",
+                     f"http://{os.environ.get('API_HOST', '127.0.0.1')}:6767")
 COMPOSE_DIR = os.environ.get("COMPOSE_DIR", "local")
 HERE = os.path.dirname(os.path.abspath(__file__))
 # EN + HE. Change here if you want different subtitle languages.

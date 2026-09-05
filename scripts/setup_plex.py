@@ -19,11 +19,11 @@ reproduces the same setup there. Idempotent.
 
 Usage:  python scripts/setup_plex.py
 """
-import re, subprocess, sys, urllib.parse, urllib.request, urllib.error, os
+import re, sys, urllib.parse, os
 import lib_env  # noqa: F401  (loads repo-root .env into os.environ on import)
 
 COMPOSE_DIR = os.environ.get("COMPOSE_DIR", "local")
-PLEX = os.environ.get("PLEX_URL", "http://127.0.0.1:32400")
+# All Plex HTTP goes through the container's localhost (see req()); no host URL.
 PREFS_PATH = "/config/Library/Application Support/Plex Media Server/Preferences.xml"
 
 # CIFS-friendly. Values are Plex "behavior" enums: never / scheduled / asap.
@@ -61,15 +61,24 @@ def token():
 
 
 def req(method, path, tok, accept_xml=True):
-    url = f"{PLEX}{path}"
+    # Route through the container's OWN localhost. Plex refuses admin writes
+    # (PUT /:/prefs, POST /library/sections) from a "remote" address — over the
+    # tailnet the VPS IP counts as remote and returns 403 even with a valid owner
+    # token. From inside the container (localhost) the same calls return 200/201.
+    url = f"http://localhost:32400{path}"
     url += ("&" if "?" in url else "?") + "X-Plex-Token=" + urllib.parse.quote(tok)
-    h = {"Accept": "application/xml"} if accept_xml else {}
-    r = urllib.request.Request(url, method=method, headers=h)
+    cmd = ["exec", "-T", "plex", "curl", "-s", "-w", "\n%{http_code}", "-X", method]
+    if accept_xml:
+        cmd += ["-H", "Accept: application/xml"]
+    cmd += [url]
+    out = (dc(cmd).stdout or "")
+    idx = out.rfind("\n")
+    body, code = (out[:idx], out[idx + 1:]) if idx >= 0 else ("", out)
     try:
-        with urllib.request.urlopen(r, timeout=30) as resp:
-            return resp.status, resp.read().decode(errors="replace")
-    except urllib.error.HTTPError as e:
-        return e.code, e.read().decode(errors="replace")[:300]
+        code = int(code.strip())
+    except ValueError:
+        code = 0
+    return code, body
 
 
 def main():
@@ -100,7 +109,7 @@ def main():
             continue
         q = urllib.parse.urlencode({
             "name": lib["name"], "type": lib["type"], "agent": lib["agent"],
-            "scanner": lib["scanner"], "language": "en",
+            "scanner": lib["scanner"], "language": "en-US",  # new agents reject "en"
             "location": lib["location"],
         })
         code, resp = req("POST", f"/library/sections?{q}", tok)
