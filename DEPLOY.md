@@ -121,7 +121,13 @@ cat >> /etc/fstab <<'EOF'
 EOF
 mount -a -v
 mkdir -p /mnt/box/media/movies /mnt/box/media/tv    # library dirs on the box
-mkdir -p /data/downloads /opt/appdata               # local working + config dirs
+mkdir -p /data/downloads/sonarr /data/downloads/radarr /opt/appdata
+# CRITICAL: /data is local disk created root-owned; Decypharr's worker runs as
+# uid 1000 and must be able to create /data/downloads/<category>. Without this
+# chown, every download fails with "mkdir ...: permission denied" and Sonarr/
+# Radarr show "qBittorrent is reporting an error". (/mnt/box already gets
+# uid=1000 from the fstab options above.)
+chown -R 1000:1000 /data
 df -h /mnt/box                                       # confirm the box is mounted
 
 # Docker

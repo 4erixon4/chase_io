@@ -10,6 +10,9 @@ secret.txt
 # Legacy secret locations (kept so old checkouts can't leak them)
 scripts/secrets.env
 
+# Personal access/reference sheet (URLs, IPs, where creds live) — never commit.
+ACCESS.md
+
 # =============================================================================
 # Local runtime data — created by the local dev stack, not source.
 # =============================================================================
