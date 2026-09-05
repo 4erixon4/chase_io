@@ -52,12 +52,24 @@ services:
   # --- Cloudflare solver for Prowlarr --------------------------------------
   # Lets Prowlarr reach Cloudflare-gated public trackers (1337x, TPB, EZTV,
   # LimeTorrents). Prowlarr talks to it over the internal docker network as
-  # http://flaresolverr:8191 (configured as a "FlareSolverr" indexer proxy by
-  # scripts/setup_stack.py), so NO host port is published. Not user-facing.
+  # http://flaresolverr:8191 (configured as a "FlareSolverr"-type indexer proxy
+  # by scripts/setup_stack.py), so NO host port is published. Not user-facing.
+  #
+  # IMAGE IS BYPARR, not FlareSolverr: FlareSolverr is archived upstream and its
+  # last release can no longer solve modern Cloudflare ("Just a moment") — it
+  # times out even when healthy. Byparr is the maintained, API-compatible
+  # drop-in (same /v1 API, same port 8191). We keep the service NAME
+  # "flaresolverr" only so the DNS alias + Prowlarr proxy host stay stable, and
+  # because Prowlarr's proxy TYPE is literally called "FlareSolverr".
+  # :latest is deliberate here (unlike the rest of the stack) — the solver must
+  # track Cloudflare changes; pinning it guarantees it eventually stops working.
+  # shm_size is required: the headless Chromium needs shared memory.
   flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:v3.3.21   # PINNED
+    image: ghcr.io/thephaseless/byparr:latest
     container_name: flaresolverr
+    shm_size: 2gb
     environment:
+      PORT: "8191"
       LOG_LEVEL: info
       TZ: ${TZ}
     restart: unless-stopped

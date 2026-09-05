@@ -185,12 +185,30 @@ def ensure_tag(pk, label):
     return created["id"]
 
 
-def ensure_flaresolverr_proxy(pk, tag_id, host="http://flaresolverr:8191"):
-    """Add a FlareSolverr indexer proxy (idempotent). Tagged indexers route
-    their requests through it, which is how Prowlarr passes Cloudflare."""
+def _setfield(fields, name, value):
+    for f in fields:
+        if f.get("name", "").lower() == name.lower():
+            f["value"] = value
+            return
+
+
+def ensure_flaresolverr_proxy(pk, tag_id, host="http://flaresolverr:8191",
+                              req_timeout=120):
+    """Ensure a FlareSolverr-type indexer proxy (image is actually Byparr) exists
+    and converges on the right host + request timeout + tag. Tagged indexers
+    route their requests through it, which is how Prowlarr passes Cloudflare.
+    Idempotent: updates the existing proxy in place rather than duplicating."""
     existing = api("prowlarr", pk, "GET", "/api/v1/indexerproxy") or []
-    if any(p.get("name") == "FlareSolverr" for p in existing):
-        log("prowlarr: FlareSolverr proxy exists (ok)")
+    proxy = next((p for p in existing
+                  if p.get("implementation", "").lower() == "flaresolverr"), None)
+    if proxy:
+        _setfield(proxy.setdefault("fields", []), "host", host)
+        _setfield(proxy["fields"], "requestTimeout", req_timeout)
+        if tag_id not in proxy.get("tags", []):
+            proxy.setdefault("tags", []).append(tag_id)
+        api("prowlarr", pk, "PUT",
+            f"/api/v1/indexerproxy/{proxy['id']}?forceSave=true", proxy)
+        log("prowlarr: FlareSolverr/Byparr proxy converged (host + timeout)")
         return
     schema_list = api("prowlarr", pk, "GET", "/api/v1/indexerproxy/schema") or []
     sch = next((s for s in schema_list
@@ -198,9 +216,8 @@ def ensure_flaresolverr_proxy(pk, tag_id, host="http://flaresolverr:8191"):
     if not sch:
         log("prowlarr: no FlareSolverr proxy schema, skipping")
         return
-    for fld in sch.get("fields", []):
-        if fld.get("name", "").lower() == "host":
-            fld["value"] = host
+    _setfield(sch.get("fields", []), "host", host)
+    _setfield(sch.get("fields", []), "requestTimeout", req_timeout)
     sch["name"] = "FlareSolverr"
     sch["tags"] = [tag_id]
     api("prowlarr", pk, "POST", "/api/v1/indexerproxy?forceSave=true", sch)
