@@ -174,7 +174,40 @@ def ensure_prowlarr_app(pk, app, arr_url, arr_key_):
     log(f"prowlarr: added application {app}")
 
 
-def ensure_prowlarr_indexer(pk, definition):
+def ensure_tag(pk, label):
+    """Return the id of a Prowlarr tag, creating it if missing."""
+    existing = api("prowlarr", pk, "GET", "/api/v1/tag") or []
+    for t in existing:
+        if t.get("label") == label:
+            return t["id"]
+    created = api("prowlarr", pk, "POST", "/api/v1/tag", {"label": label})
+    log(f"prowlarr: created tag '{label}'")
+    return created["id"]
+
+
+def ensure_flaresolverr_proxy(pk, tag_id, host="http://flaresolverr:8191"):
+    """Add a FlareSolverr indexer proxy (idempotent). Tagged indexers route
+    their requests through it, which is how Prowlarr passes Cloudflare."""
+    existing = api("prowlarr", pk, "GET", "/api/v1/indexerproxy") or []
+    if any(p.get("name") == "FlareSolverr" for p in existing):
+        log("prowlarr: FlareSolverr proxy exists (ok)")
+        return
+    schema_list = api("prowlarr", pk, "GET", "/api/v1/indexerproxy/schema") or []
+    sch = next((s for s in schema_list
+                if s.get("implementation", "").lower() == "flaresolverr"), None)
+    if not sch:
+        log("prowlarr: no FlareSolverr proxy schema, skipping")
+        return
+    for fld in sch.get("fields", []):
+        if fld.get("name", "").lower() == "host":
+            fld["value"] = host
+    sch["name"] = "FlareSolverr"
+    sch["tags"] = [tag_id]
+    api("prowlarr", pk, "POST", "/api/v1/indexerproxy?forceSave=true", sch)
+    log(f"prowlarr: added FlareSolverr proxy ({host})")
+
+
+def ensure_prowlarr_indexer(pk, definition, tags=None):
     existing = api("prowlarr", pk, "GET", "/api/v1/indexer") or []
     if any(i.get("definitionName") == definition or i.get("name") == definition
            for i in existing):
@@ -190,9 +223,12 @@ def ensure_prowlarr_indexer(pk, definition):
     sch["name"] = definition
     sch["enable"] = True
     sch["appProfileId"] = app_profile_id
+    if tags:
+        sch["tags"] = tags        # route through FlareSolverr proxy (same tag)
     try:
         api("prowlarr", pk, "POST", "/api/v1/indexer?forceSave=true", sch)
-        log(f"prowlarr: added indexer {definition}")
+        log(f"prowlarr: added indexer {definition}"
+            + (" [via FlareSolverr]" if tags else ""))
         return True
     except RuntimeError as e:
         log(f"prowlarr: could not add {definition}: {e}")
@@ -218,13 +254,23 @@ def main():
         ensure_download_client(s, keys[s], dc_user, dc_pass)
 
     log("--- 3. Prowlarr ---")
-    ensure_prowlarr_app(keys["prowlarr"], "radarr", SVC["radarr"]["net"], keys["radarr"])
-    ensure_prowlarr_app(keys["prowlarr"], "sonarr", SVC["sonarr"]["net"], keys["sonarr"])
-    # Best-effort: add several reliable API-based public indexers (no Cloudflare).
-    # Prowlarr live-tests each on add; whichever connect stay. Broad + movie + TV.
+    pk = keys["prowlarr"]
+    ensure_prowlarr_app(pk, "radarr", SVC["radarr"]["net"], keys["radarr"])
+    ensure_prowlarr_app(pk, "sonarr", SVC["sonarr"]["net"], keys["sonarr"])
+
+    # FlareSolverr proxy + a tag; Cloudflare-gated indexers get the tag so their
+    # requests route through FlareSolverr (the flaresolverr service in compose).
+    fs_tag = ensure_tag(pk, "flaresolverr")
+    ensure_flaresolverr_proxy(pk, fs_tag)
+
     n = 0
-    for d in ("TorrentsCSV", "thepiratebay", "yts", "eztv", "torrentdownloads"):
-        if ensure_prowlarr_indexer(keys["prowlarr"], d):
+    # Direct (API-based, no Cloudflare): movies (yts) + general (TorrentsCSV).
+    for d in ("yts", "TorrentsCSV"):
+        if ensure_prowlarr_indexer(pk, d):
+            n += 1
+    # Cloudflare-gated (broad movie + TV coverage) — via FlareSolverr.
+    for d in ("1337x", "thepiratebay", "eztv", "limetorrents"):
+        if ensure_prowlarr_indexer(pk, d, tags=[fs_tag]):
             n += 1
     if n == 0:
         log("prowlarr: no indexer added automatically — add one in the UI "

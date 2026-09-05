@@ -49,6 +49,19 @@ services:
       - "${TS_IP}:9696:9696"
     restart: unless-stopped
 
+  # --- Cloudflare solver for Prowlarr --------------------------------------
+  # Lets Prowlarr reach Cloudflare-gated public trackers (1337x, TPB, EZTV,
+  # LimeTorrents). Prowlarr talks to it over the internal docker network as
+  # http://flaresolverr:8191 (configured as a "FlareSolverr" indexer proxy by
+  # scripts/setup_stack.py), so NO host port is published. Not user-facing.
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:v3.3.21   # PINNED
+    container_name: flaresolverr
+    environment:
+      LOG_LEVEL: info
+      TZ: ${TZ}
+    restart: unless-stopped
+
   # --- Movies / TV ---------------------------------------------------------
   radarr:
     image: lscr.io/linuxserver/radarr:latest     # freeze to version-<X> (README)

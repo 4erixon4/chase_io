@@ -49,6 +49,15 @@ services:
       - "127.0.0.1:9696:9696"
     restart: unless-stopped
 
+  # --- Cloudflare solver for Prowlarr (internal only) ----------------------
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:v3.3.21
+    container_name: flaresolverr-local
+    environment:
+      LOG_LEVEL: info
+      TZ: ${TZ}
+    restart: unless-stopped
+
   # --- Movies / TV ---------------------------------------------------------
   radarr:
     image: lscr.io/linuxserver/radarr:latest
