@@ -70,14 +70,14 @@ def arr_key(service):
     return m.group(1).strip()
 
 
-def api(service, key, method, path, body=None):
+def api(service, key, method, path, body=None, timeout=30):
     url = f"http://{API_HOST}:{SVC[service]['port']}{path}"
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method,
                                  headers={"X-Api-Key": key,
                                           "Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             raw = r.read().decode()
             return json.loads(raw) if raw else None
     except urllib.error.HTTPError as e:
@@ -226,7 +226,10 @@ def ensure_prowlarr_indexer(pk, definition, tags=None):
     if tags:
         sch["tags"] = tags        # route through FlareSolverr proxy (same tag)
     try:
-        api("prowlarr", pk, "POST", "/api/v1/indexer?forceSave=true", sch)
+        # Prowlarr live-tests on add; via FlareSolverr a Cloudflare solve can take
+        # 30-60s, so allow generous time (the add is idempotent on re-run anyway).
+        api("prowlarr", pk, "POST", "/api/v1/indexer?forceSave=true", sch,
+            timeout=180)
         log(f"prowlarr: added indexer {definition}"
             + (" [via FlareSolverr]" if tags else ""))
         return True
