@@ -27,6 +27,8 @@ import time
 import urllib.parse
 import urllib.request
 
+import lib_env  # noqa: F401  (loads repo-root .env into os.environ on import)
+
 COMPOSE_DIR = os.environ.get("COMPOSE_DIR", "local")
 API_HOST = os.environ.get("API_HOST", "127.0.0.1")
 MAX_WAIT = int(os.environ.get("MAX_WAIT_SEC", "360"))
@@ -40,8 +42,7 @@ def log(m): print(f"[s1] {m}", flush=True)
 
 
 def dc(args, **kw):
-    return subprocess.run(["docker", "compose"] + args, cwd=COMPOSE_DIR,
-                          capture_output=True, text=True, **kw)
+    return lib_env.dc(args, COMPOSE_DIR, **kw)
 
 
 def key(service):

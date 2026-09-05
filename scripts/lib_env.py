@@ -16,6 +16,7 @@ For local development we also overlay `local/.env` and `stack/.env` if present
     token = env("TORBOX_API_KEY", required=True)
 """
 import os
+import subprocess
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -49,3 +50,40 @@ def env(key, default=None, required=False):
             f".env (copy .env.example) or export it / add it in Coolify."
         )
     return val
+
+
+def container_id(service):
+    """Resolve a running container by its compose SERVICE label — works whether
+    the container is named plainly (local `docker compose`) or mangled by
+    Coolify (radarr-<hash>), and regardless of the compose project directory."""
+    r = subprocess.run(
+        ["docker", "ps", "-q", "-f", f"label=com.docker.compose.service={service}"],
+        capture_output=True, text=True)
+    ids = r.stdout.split()
+    return ids[0] if ids else None
+
+
+def dc(args, compose_dir=None, **kw):
+    """docker-compose shim used by the setup scripts.
+
+    `exec`/`restart` are resolved to `docker exec`/`docker restart` against the
+    container found by compose service label, so they work on Coolify (where the
+    build dir is deleted post-deploy and container_name is rewritten). Any other
+    subcommand falls back to real `docker compose` in `compose_dir` (local dev).
+    """
+    kw.setdefault("capture_output", True)
+    kw.setdefault("text", True)
+    if args and args[0] in ("exec", "restart"):
+        if args[0] == "exec":
+            rest = [a for a in args[1:] if a != "-T"]
+            svc, cmd = rest[0], rest[1:]
+        else:
+            svc, cmd = args[1], None
+        cid = container_id(svc)
+        if not cid:
+            return subprocess.CompletedProcess(
+                args, 1, "", f"[lib_env] no running container for service '{svc}'")
+        base = ["docker", "exec", cid] + cmd if args[0] == "exec" \
+            else ["docker", "restart", cid]
+        return subprocess.run(base, **kw)
+    return subprocess.run(["docker", "compose"] + args, cwd=compose_dir, **kw)

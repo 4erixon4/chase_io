@@ -30,8 +30,7 @@ PROFILE_NAME = "EN+HE"
 
 
 def log(m): print(f"[bazarr] {m}", flush=True)
-def dc(a): return subprocess.run(["docker","compose"]+a, cwd=COMPOSE_DIR,
-                                 capture_output=True, text=True)
+def dc(a): return lib_env.dc(a, COMPOSE_DIR)
 
 def arr_key(s):
     xml = dc(["exec","-T",s,"cat","/config/config.xml"]).stdout

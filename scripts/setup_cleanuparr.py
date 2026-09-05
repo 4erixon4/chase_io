@@ -44,8 +44,7 @@ DECYPHARR_HOST = "http://decypharr:8282"
 def log(m): print(f"[cleanuparr] {m}", flush=True)
 
 
-def dc(a): return subprocess.run(["docker", "compose"] + a, cwd=COMPOSE_DIR,
-                                 capture_output=True, text=True)
+def dc(a): return lib_env.dc(a, COMPOSE_DIR)
 
 
 def arr_key(s):

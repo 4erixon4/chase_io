@@ -25,9 +25,7 @@ REPO = os.path.dirname(HERE)
 
 
 def key(service):
-    xml = subprocess.run(
-        ["docker", "compose", "exec", "-T", service, "cat", "/config/config.xml"],
-        cwd=COMPOSE_DIR, capture_output=True, text=True).stdout
+    xml = lib_env.dc(["exec", "-T", service, "cat", "/config/config.xml"], COMPOSE_DIR).stdout
     return re.search(r"<ApiKey>([^<]+)</ApiKey>", xml).group(1).strip()
 
 

@@ -50,9 +50,8 @@ def log(m): print(f"[setup] {m}", flush=True)
 
 
 def dc(args, **kw):
-    """Run a docker compose command in COMPOSE_DIR."""
-    return subprocess.run(["docker", "compose"] + args, cwd=COMPOSE_DIR,
-                          capture_output=True, text=True, **kw)
+    """exec/restart resolved by service label; else compose in COMPOSE_DIR."""
+    return lib_env.dc(args, COMPOSE_DIR, **kw)
 
 
 def container_file(service, path):

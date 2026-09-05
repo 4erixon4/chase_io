@@ -20,6 +20,7 @@ reproduces the same setup there. Idempotent.
 Usage:  python scripts/setup_plex.py
 """
 import re, subprocess, sys, urllib.parse, urllib.request, urllib.error, os
+import lib_env  # noqa: F401  (loads repo-root .env into os.environ on import)
 
 COMPOSE_DIR = os.environ.get("COMPOSE_DIR", "local")
 PLEX = os.environ.get("PLEX_URL", "http://127.0.0.1:32400")
@@ -50,8 +51,7 @@ LIBRARIES = [
 
 
 def log(m): print(f"[plex] {m}", flush=True)
-def dc(a): return subprocess.run(["docker","compose"]+a, cwd=COMPOSE_DIR,
-                                 capture_output=True, text=True)
+def dc(a): return lib_env.dc(a, COMPOSE_DIR)
 
 
 def token():

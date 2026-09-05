@@ -9,15 +9,15 @@ to confirm everything wired up.
 Env:  COMPOSE_DIR (default "local"; use "stack" or an absolute path on the VPS),
       API_HOST (default 127.0.0.1).
 """
-import json, os, re, subprocess, urllib.request
+import json, os, re, urllib.request
+import lib_env
 
 COMPOSE_DIR = os.environ.get("COMPOSE_DIR", "local")
 API_HOST = os.environ.get("API_HOST", "127.0.0.1")
 
 
 def key(svc):
-    xml = subprocess.run(["docker", "compose", "exec", "-T", svc, "cat", "/config/config.xml"],
-                         cwd=COMPOSE_DIR, capture_output=True, text=True).stdout
+    xml = lib_env.dc(["exec", "-T", svc, "cat", "/config/config.xml"], COMPOSE_DIR).stdout
     return re.search(r"<ApiKey>([^<]+)</ApiKey>", xml).group(1)
 
 
@@ -26,8 +26,8 @@ def get(port, path, k):
     return json.loads(urllib.request.urlopen(req, timeout=30).read())
 
 
-dcfg = json.loads(subprocess.run(["docker", "compose", "exec", "-T", "decypharr", "cat", "/app/config.json"],
-                  cwd=COMPOSE_DIR, capture_output=True, text=True).stdout)
+dcfg = json.loads(lib_env.dc(["exec", "-T", "decypharr", "cat", "/app/config.json"],
+                             COMPOSE_DIR).stdout)
 print("Decypharr default_download_action:", dcfg.get("default_download_action"))
 
 for svc, port in (("radarr", 7878), ("sonarr", 8989)):
